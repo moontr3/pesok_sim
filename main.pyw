@@ -5,6 +5,7 @@ import easing_functions as easing
 import copy
 import draw
 from typing import List
+import clipboard
 
 pg.init()
 
@@ -27,19 +28,15 @@ class Tile:
     def __init__(self, x, y, dir):
         self.powered = False
         self.direction = dir
-        self.pos = [x, y]
-        self.color = (64,0,0)
-        self.power_color = (255,0,0)
-        self.name = ''
-        self.description = ''
+        self.pos = [int(x), int(y)]
 
     @property
     def x(self):
-        return self.pos[0]
+        return int(self.pos[0])
 
     @property
     def y(self):
-        return self.pos[1]
+        return int(self.pos[1])
     
     def can_power(self, offset):
         if not self.powered: return False
@@ -53,6 +50,8 @@ class Tile:
 class Wire(Tile):
     name = 'Wire'
     description = 'Transfers signal from its back to its front.'
+    color = (60,25,25)
+    power_color = (255,70,70)
 
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
@@ -60,11 +59,11 @@ class Wire(Tile):
 class Splitter(Tile):
     name = 'Splitter'
     description = 'Transfers signal from its back to everywhere except its back and tiles adjacent to its back.'
+    color = (75,50,50)
+    power_color = (200,140,140)
 
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
-        self.color = (90,30,30)
-        self.power_color = (255,80,80)
     
     def can_power(self, offset):
         if not self.powered: return False
@@ -75,12 +74,12 @@ class Splitter(Tile):
 class Emitter(Tile):
     name = 'Emitter'
     description = 'Emits constant signal from its front. Cannot be turned off.'
+    color = (255,160,160)
+    power_color = (255,160,160)
     
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
         self.powered = True
-        self.color = (255,128,128)
-        self.power_color = (255,128,128)
 
     def can_be_powered(self, offset):
         return False
@@ -92,12 +91,12 @@ class Emitter(Tile):
 class Threader(Tile):
     name = 'Threader'
     description = 'Splits the incoming signal to the sides adjacent to its front.'
+    color = (0,32,128)
+    power_color = (0,64,255)
     
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
         self.powered = False
-        self.color = (0,32,128)
-        self.power_color = (0,64,255)
     
     def can_power(self, offset):
         if not self.powered: return False
@@ -108,11 +107,11 @@ class Threader(Tile):
 class Not(Tile):
     name = 'Not Gate'
     description = 'Emits a signal from its front if it doesn\'t receive power from its back.'
+    color = (64,64,64)
+    power_color = (192,192,192)
 
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
-        self.color = (64,64,64)
-        self.power_color = (192,192,192)
     
     def can_power(self, offset):
         if self.powered: return False
@@ -165,7 +164,7 @@ class Grid:
             for pos in poses:
                 intpos = pos
                 pos = f'{pos[0]} {pos[1]}'
-                offset = [intpos[0]-i.pos[0], intpos[1]-i.pos[1]]
+                offset = [intpos[0]-i.x, intpos[1]-i.y]
                 if pos in table:
                     elem = table[pos]
                     if i.can_be_powered(offset):
@@ -178,10 +177,12 @@ class Grid:
             
 
 class App:
-    def __init__(self, save_name):
+    def __init__(self, save_name='Untitled'):
         self.grid: Grid = Grid()
         self.zoom: int = 32
         self.cam_offset = [0,0]
+        self.dragging = False
+        self.mouse_tile = (-1,-1)
 
         self.tick_speed = 10
         self.tick_timer = 0
@@ -191,11 +192,17 @@ class App:
 
         self.save_name = save_name
 
+        self.resize()
+
     def get_mouse_tile(self):
         return [
             (mouse_pos[0]+self.cam_offset[0])//self.zoom, 
             (mouse_pos[1]+self.cam_offset[1])//self.zoom
         ]
+    
+    def resize(self):
+        self.top_bar_rect =    pg.Rect(0,0,windowx,TOP_BAR_SIZE)
+        self.bottom_bar_rect = pg.Rect(0,windowy-BOTTOM_BAR_SIZE,windowx,BOTTOM_BAR_SIZE)
 
     @property
     def direction(self):
@@ -205,15 +212,15 @@ class App:
     def selected_block(self) -> Tile:
         return blocks[self.sel_index]
 
-    def draw_tile(self, pos, color, direction=None, outline=0):
+    def draw_tile(self, pos, color, direction=None, outline=0, roundness=0):
         rect = pg.Rect(
-            pos[0]*self.zoom-self.cam_offset[0],
-            pos[1]*self.zoom-self.cam_offset[1],
-            self.zoom, self.zoom
+            pos[0]*self.zoom-self.cam_offset[0]+1,
+            pos[1]*self.zoom-self.cam_offset[1]+1,
+            self.zoom-2, self.zoom-2
         )
         if not rect.colliderect(pg.Rect(0,0,windowx,windowy)):
             return
-        pg.draw.rect(screen, color, rect, outline)
+        pg.draw.rect(screen, color, rect, outline, roundness)
 
         if direction != None:
             pg.draw.line(screen, (255,255,255),
@@ -223,15 +230,49 @@ class App:
 
 
     def draw(self):
-        # grid
-        for i in self.grid.tiles:
-            self.draw_tile(i.pos, i.color if not i.powered else i.power_color, i.direction)
-        self.draw_tile(self.mouse_tile, (255,255,255), self.direction, 1)
+        roundness = int(self.zoom/6)
 
-        draw.text(f'{self.sel_index}, {self.selected_block.name}')
+        # fading grid
+        if self.mouse_in_bounds:
+            top_x = self.mouse_tile[0]-GRID_FADE_IN_RADIUS+1
+            top_y = self.mouse_tile[1]-GRID_FADE_IN_RADIUS+1
+
+            for y in range(GRID_FADE_IN_RADIUS*2):
+                y += top_y
+                for x in range(GRID_FADE_IN_RADIUS*2):
+                    x += top_x
+                    distance = get_distance(*[i+0.5 for i in self.mouse_tile], x, y)
+                    distance_key = GRID_FADE_IN_RADIUS-min(GRID_FADE_IN_RADIUS, distance)
+                    distance_key /= GRID_FADE_IN_RADIUS
+                    color = int(BG_BRIGHTNESS+(distance_key*DOT_BRIGHTNESS))
+                    
+                    pg.draw.circle(screen, (color,color,color), (
+                        x*self.zoom-self.cam_offset[0],
+                        y*self.zoom-self.cam_offset[1]
+                    ), round(self.zoom/16))
+        # objects
+        for i in self.grid.tiles:
+            self.draw_tile(i.pos, i.color if not i.powered else i.power_color, i.direction, roundness=roundness)
+        # mouse tile
+        if self.mouse_in_bounds:
+            if self.hovered_block == None:
+                self.draw_tile(self.mouse_tile, self.selected_block.color, self.direction, 3, roundness)
+                self.draw_tile(self.mouse_tile, (128,128,128), self.direction, 1, roundness)
+            else:
+                self.draw_tile(self.mouse_tile, (255,255,255), self.direction, 1, roundness)
+
+        # bars
+        pg.draw.rect(screen, (30,30,30), self.top_bar_rect)
+        pg.draw.rect(screen, (30,30,30), self.bottom_bar_rect)
+
 
     def update(self):
-        if mouse_wheel != 0:
+        print(self.direction, self.dir_index)
+        # updating mouse
+        self.mouse_in_bounds = mouse_pos[1] > TOP_BAR_SIZE\
+            and mouse_pos[1] < windowy-BOTTOM_BAR_SIZE
+
+        if mouse_wheel != 0 and self.mouse_in_bounds:
             # changing tick speed
             if keys[pg.K_LSHIFT]:
                 self.tick_speed = max(min(self.tick_speed+mouse_wheel, fps), 1)
@@ -258,23 +299,32 @@ class App:
                 while self.dir_index >= len(directions):
                     self.dir_index -= len(directions)
 
+        # moving camera
+        if mmb_down and self.mouse_in_bounds:
+            self.dragging = True
+        elif not mouse_press[1]:
+            self.dragging = False
+
+        if self.dragging and mouse_moved != (0,0):
+            self.cam_offset[0] -= mouse_moved[0]
+            self.cam_offset[1] -= mouse_moved[1]
+
         # changing selected tile
         if num_pressed != None and num_pressed <= len(blocks):
             self.sel_index = int(num_pressed-1)
 
-        # moving camera
-        if mouse_press[1] and mouse_moved != (0,0):
-            self.cam_offset[0] -= mouse_moved[0]
-            self.cam_offset[1] -= mouse_moved[1]
-
         # moving mouse
+        self.prev_mouse_tile = type(self.mouse_tile)(self.mouse_tile)
         self.mouse_tile = self.get_mouse_tile()
+        if self.mouse_tile != self.prev_mouse_tile:
+            self.hovered_block = self.grid.find(self.mouse_tile)
 
         # pressing mouse
-        if mouse_press[0]:
-            self.grid.place(self.selected_block, self.mouse_tile, self.direction)
-        if mouse_press[2]:
-            self.grid.erase(self.mouse_tile)
+        if self.mouse_in_bounds:
+            if mouse_press[0]:
+                self.grid.place(self.selected_block, self.mouse_tile, self.direction)
+            if mouse_press[2]:
+                self.grid.erase(self.mouse_tile)
 
         # game tick
         self.tick_timer -= 1
@@ -282,9 +332,19 @@ class App:
             self.tick_timer = self.tick_speed
             self.grid.tick()
 
+        # copying map
+        if pg.K_c in just_pressed and keys[pg.K_LCTRL]:
+            clipboard.copy(save(self.grid))
+
 
 
 # app variables
+
+TOP_BAR_SIZE = 75
+BOTTOM_BAR_SIZE = 20
+GRID_FADE_IN_RADIUS = 6
+BG_BRIGHTNESS = 20
+DOT_BRIGHTNESS = 50
 
 LEFT = [-1,0]
 RIGHT = [1,0]
@@ -312,6 +372,7 @@ blocks = [
     Emitter,
     Threader,
 ]
+dfps = 0.0
 
 
 # app functions
@@ -326,11 +387,14 @@ def get_adjacent(dir, include_orig=True, dst=1):
         out.append(i)
     return [directions[i] for i in out]
 
+def get_distance(x1, y1, x2, y2):
+    return ((x1-x2)**2+(y1-y2)**2)**0.5
+
 def save(grid: Grid) -> str:
     obj = []
     for i in grid.tiles:
         index = str(blocks.index(type(i)))
-        obj.append(f'{index},{i.x},{i.y},{i.dir[0]},{i.dir[1]},{int(i.powered)}')
+        obj.append(f'{index},{i.x},{i.y},{i.direction[0]},{i.direction[1]},{int(i.powered)}')
     return ';'.join(obj)
 
 def load(save: str) -> Grid:
@@ -346,7 +410,7 @@ def load(save: str) -> Grid:
 
 # preparing
 
-app = App('new')
+app = App()
 
 
 # main loop
@@ -354,15 +418,20 @@ app = App('new')
 while running:
     # input
     events = pg.event.get()
+
     mouse_pos = pg.mouse.get_pos()
     mouse_press = pg.mouse.get_pressed(5)
     mouse_moved = pg.mouse.get_rel()
     mouse_wheel = 0
+
     keys = pg.key.get_pressed()
     just_pressed = []
     num_pressed = None
 
-    screen.fill((0,0,0))
+    lmb_down = False
+    mmb_down = False
+
+    screen.fill((BG_BRIGHTNESS, BG_BRIGHTNESS, BG_BRIGHTNESS))
 
     # events
     for event in events:
@@ -379,6 +448,7 @@ while running:
             halfx = windowx//2
             halfy = windowy//2
             screen = pg.display.set_mode((windowx,windowy), pg.RESIZABLE)
+            app.resize()
 
         if event.type == pg.MOUSEWHEEL:
             mouse_wheel = event.y
@@ -388,9 +458,16 @@ while running:
             if event.unicode.isdigit():
                 num_pressed = int(event.unicode)
 
+        if event.type == pg.MOUSEBUTTONDOWN:
+            if event.button == pg.BUTTON_LEFT:
+                lmb_down = True
+            if event.button == pg.BUTTON_MIDDLE:
+                mmb_down = True
+
     # updating
     app.update()
     app.draw()
 
     pg.display.flip()
     clock.tick(fps)
+    dfps = round(clock.get_fps(), 2)
