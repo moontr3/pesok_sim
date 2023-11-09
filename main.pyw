@@ -91,8 +91,8 @@ class Emitter(Tile):
 class Threader(Tile):
     name = 'Threader'
     description = 'Splits the incoming signal to the sides adjacent to its front.'
-    color = (0,32,128)
-    power_color = (0,64,255)
+    color = (20,50,120)
+    power_color = (50,120,255)
     
     def __init__(self, x, y, dir):
         super().__init__(x, y, dir)
@@ -196,8 +196,8 @@ class App:
 
     def get_mouse_tile(self):
         return [
-            (mouse_pos[0]+self.cam_offset[0])//self.zoom, 
-            (mouse_pos[1]+self.cam_offset[1])//self.zoom
+            int((mouse_pos[0]+self.cam_offset[0])//self.zoom), 
+            int((mouse_pos[1]+self.cam_offset[1])//self.zoom)
         ]
     
     def resize(self):
@@ -255,7 +255,7 @@ class App:
             self.draw_tile(i.pos, i.color if not i.powered else i.power_color, i.direction, roundness=roundness)
         # mouse tile
         if self.mouse_in_bounds:
-            if self.hovered_block == None:
+            if self.grid.find(self.mouse_tile) == None:
                 self.draw_tile(self.mouse_tile, self.selected_block.color, self.direction, 3, roundness)
                 self.draw_tile(self.mouse_tile, (128,128,128), self.direction, 1, roundness)
             else:
@@ -315,8 +315,6 @@ class App:
         # moving mouse
         self.prev_mouse_tile = type(self.mouse_tile)(self.mouse_tile)
         self.mouse_tile = self.get_mouse_tile()
-        if self.mouse_tile != self.prev_mouse_tile:
-            self.hovered_block = self.grid.find(self.mouse_tile)
 
         # pressing mouse
         if self.mouse_in_bounds:
@@ -341,7 +339,7 @@ class App:
 
 TOP_BAR_SIZE = 75
 BOTTOM_BAR_SIZE = 20
-GRID_FADE_IN_RADIUS = 6
+GRID_FADE_IN_RADIUS = 8
 BG_BRIGHTNESS = 20
 DOT_BRIGHTNESS = 50
 
