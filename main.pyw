@@ -267,7 +267,6 @@ class App:
 
 
     def update(self):
-        print(self.direction, self.dir_index)
         # updating mouse
         self.mouse_in_bounds = mouse_pos[1] > TOP_BAR_SIZE\
             and mouse_pos[1] < windowy-BOTTOM_BAR_SIZE
