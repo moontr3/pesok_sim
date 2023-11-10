@@ -185,6 +185,7 @@ class App:
         self.mouse_tile = (-1,-1)
 
         self.tick_speed = 10
+        self.tps = 6
         self.tick_timer = 0
 
         self.dir_index = 0
@@ -223,9 +224,18 @@ class App:
         pg.draw.rect(screen, color, rect, outline, roundness)
 
         if direction != None:
+            line_offset = [
+                rect.centerx+direction[0]*(self.zoom/2-1),
+                rect.centery+direction[1]*(self.zoom/2-1)
+            ]
+            if roundness > 0 and 0 not in direction:
+                line_offset = [
+                    round(line_offset[0]-roundness/3 if direction[0] > 0 else line_offset[0]+roundness/3),
+                    round(line_offset[1]-roundness/3 if direction[1] > 0 else line_offset[1]+roundness/3)
+                ]
+                
             pg.draw.line(screen, (255,255,255),
-                rect.center,
-                [rect.centerx+direction[0]*(self.zoom/2-1), rect.centery+direction[1]*(self.zoom/2-1)]
+                rect.center, line_offset
             )
 
 
@@ -256,7 +266,9 @@ class App:
         # mouse tile
         if self.mouse_in_bounds:
             if self.grid.find(self.mouse_tile) == None:
-                self.draw_tile(self.mouse_tile, self.selected_block.color, self.direction, 3, roundness)
+                self.draw_tile(self.mouse_tile, self.selected_block.color, self.direction,
+                    max(2, int(self.zoom/10)),
+                roundness)
                 self.draw_tile(self.mouse_tile, (128,128,128), self.direction, 1, roundness)
             else:
                 self.draw_tile(self.mouse_tile, (255,255,255), self.direction, 1, roundness)
@@ -264,6 +276,13 @@ class App:
         # bars
         pg.draw.rect(screen, (30,30,30), self.top_bar_rect)
         pg.draw.rect(screen, (30,30,30), self.bottom_bar_rect)
+
+        # info on the bottom
+        spread = windowx/4
+        draw.text(f'FPS: {dfps}', (0*spread+5, self.bottom_bar_rect.centery), size=16, v='m')
+        draw.text(f'X:{self.mouse_tile[0]} Y:{self.mouse_tile[1]}', (1*spread+5, self.bottom_bar_rect.centery), size=16, v='m')
+        draw.text(f'Zoom: {self.zoom}px', (2*spread+5, self.bottom_bar_rect.centery), size=16, v='m')
+        draw.text(f'TPS: {self.tps}', (3*spread+5, self.bottom_bar_rect.centery), size=16, v='m')
 
 
     def update(self):
@@ -274,7 +293,8 @@ class App:
         if mouse_wheel != 0 and self.mouse_in_bounds:
             # changing tick speed
             if keys[pg.K_LSHIFT]:
-                self.tick_speed = max(min(self.tick_speed+mouse_wheel, fps), 1)
+                self.tps = max(min(self.tps+mouse_wheel*(9*int(keys[pg.K_LALT])+1), fps), 1)
+                self.tick_speed = 1/(self.tps/60)
 
             # zooming
             elif keys[pg.K_LCTRL]:
@@ -282,7 +302,7 @@ class App:
                     (mouse_pos[0]+self.cam_offset[0])/self.zoom,
                     (mouse_pos[1]+self.cam_offset[1])/self.zoom
                 ]
-                self.zoom = max(min(self.zoom+mouse_wheel*2, 128), 4)
+                self.zoom = max(min(self.zoom+mouse_wheel*2*(4*int(keys[pg.K_LALT])+1), 128), 4)
                 difference = [
                     old_tile[0]*self.zoom-(mouse_pos[0]+self.cam_offset[0]),
                     old_tile[1]*self.zoom-(mouse_pos[1]+self.cam_offset[1])
@@ -325,8 +345,8 @@ class App:
 
         # game tick
         self.tick_timer -= 1
-        if self.tick_timer <= 0:
-            self.tick_timer = self.tick_speed
+        while self.tick_timer <= 0:
+            self.tick_timer += self.tick_speed
             self.grid.tick()
 
         # copying map
